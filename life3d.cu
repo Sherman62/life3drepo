@@ -58,42 +58,34 @@ __global__
 void life3d_run(int N, int cbsize,char *universe,char*next, int T)
 {
     
-    // char *next = (char *)malloc(N * N *: N);
-   //原数据最少也是3*3*3，那么假设这里file开到5*5*5，能够计算得到3*3的数据。
-     //原数据边数是N，那么分的块数应该是N/5向上取整。
+   
     extern __shared__ int cubeBlock[];
 
+    //线程在总体中的下标
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
+    //每个线程在线程块中的下标（相当于threadIdx.x,y,z）
     int cbx = (x%cbsize) + 1,cby = (y%cbsize) + 1,cbz = (z% cbsize) + 1;
-    //block最下角的线程下标为：
+    //每个block最下角的线程下标为：
     // （(x/cbsize*cbsize)， (y/cbsize*cbsize)， (z/cbsize*cbsize)）
     //之后再次基础上对六个面进行赋值。注意该点需要各个维度减去1才能得到cblock的位置
 
     int alive = 0,ans;
-
-        //因为同步函数和只有一个block的原因能够保持数据正确性
-        //循环展开的同时使用tile减少对内存读入。
-        //选择在每次循环中将next数组读入共享内存。
-        //想把三维线程号对应映射到一个中心化后的位置。
     //对坐标都迁移过了，不需要额外加上base
     // int cbbase = (cbsize+2)*(cbsize+2)+(cbsize+2)+1;
-     
+    
+    //把下面当成通过坐标计算，而不是一维计算。
     int cbIdx = cbx*(cbsize+2)*(cbsize+2) + cby*(cbsize+2) + cbz;
+    //每个线程对对应位置赋值一次，即进行一次访存。
     cubeBlock[cbIdx] = AT(x,y,z);
-    //赋值结束需要统计临近个数。对于所有需要的数在当前空间的才能缩短时间。
 
-    //先给cubeblock上下六个边填充填充边缘值
-
+    //先给cubeblock外围上下左右前后六面边填充填充边缘值
     //本来想借助cbx列举几个数，发现之前设置的cbx最小值为1.
+    //没有做到六个面之间重合的边只读取一次内存，可以继续改进。
     if(cbx == 1 && cby == 1 && cbz == 1){
-        //找 x= 0 ,变动yz平面
-        //该面的中心距离cubeblock的中心相距(cbsize)/2 个 (cbsize+2)*(cbsize+2)
-        //这里默认cubesize是奇数了,且该距离可加可减去。
-        //坏了，就算是cbsize是奇数，外面的层cbsize+2也是奇数
-        
+        //找 x= 0 ,yz平面 
         int stx = (x/cbsize*cbsize) - 1;
         int sty = (y/cbsize*cbsize) - 1;
         int stz = (z/cbsize*cbsize) - 1;
@@ -104,11 +96,12 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
                 
                 int offset = dx * (cbsize+2) *(cbsize+2) + dy * (cbsize+2) + dz;
                     //同时考虑在universe中出界的问题
-                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
+                cubeBlock[offset] = AT((stx+0+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
                 }
         }
     }
     else if(cbx == 1 && cby == 1 && cbz == 2){
+        //找 x= cbsize+1 ,yz平面 
         int stx = (x/cbsize*cbsize) - 1 + (cbsize+1);
         int sty = (y/cbsize*cbsize) - 1;
         int stz = (z/cbsize*cbsize) - 1;
@@ -119,15 +112,12 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
                 
                 int offset = dx * (cbsize+2) *(cbsize+2) + dy * (cbsize+2) + dz;
                     //同时考虑在universe中出界的问题
-                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
+                cubeBlock[offset] = AT((stx+0+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
                 }
         }  
     }
     else if(cbx == 2 && cby == 2 && cbz == 1){
             //令y = 0 ,变动xz平面
-        //该面的中心距离cubeblock的中心相距(cbsize)/2 个 (cbsize+2)
-        //这里默认cubesize是奇数了,且该距离可加可减去。
-        //坏了，就算是cbsize是奇数，外面的层cbsize+2也是奇数
         int stx = (x/cbsize*cbsize) - 1;
         int sty = (y/cbsize*cbsize) - 1;
         int stz = (z/cbsize*cbsize) - 1;
@@ -138,15 +128,13 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
                 
                 int offset = dx * (cbsize+2) *(cbsize+2) + dy * (cbsize+2) + dz;
                     //同时考虑在universe中出界的问题
-                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
+                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+0+N)%N,(stz+dz+N)%N);
                 }
         }            
     }  
     else if(cbx == 2 && cby == 2 && cbz == 2){
-            //令y = cubesize-1 ,变动xz平面
-        //该面的中心距离cubeblock的中心相距(cbsize)/2 个 (cbsize+2)
-        //这里默认cubesize是奇数了,且该距离可加可减去。
-        //坏了，就算是cbsize是奇数，外面的层cbsize+2也是奇数
+            //令y = cubesize+1 ,变动xz平面
+    
         int stx = (x/cbsize*cbsize) - 1;
         int sty = (y/cbsize*cbsize) - 1 + (cbsize+1);
         int stz = (z/cbsize*cbsize) - 1;
@@ -157,15 +145,13 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
                 
                 int offset = dx * (cbsize+2) *(cbsize+2) + dy * (cbsize+2) + dz;
                     //同时考虑在universe中出界的问题
-                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
+                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+0+N)%N,(stz+dz+N)%N);
                 }
         }         
     } 
     else if(cbx == 3 && cby == 3 && cbz == 1){
-            //令z = cubesize-1 ,变动xy平面
-        //该面的中心距离cubeblock的中心相距(cbsize)/2 个 1
-        //这里默认cubesize是奇数了,且该距离可加可减去。
-        //坏了，就算是cbsize是奇数，外面的层cbsize+2也是奇数
+            //令z = 0 ,变动xy平面
+   
         int stx = (x/cbsize*cbsize) - 1;
         int sty = (y/cbsize*cbsize) - 1;
         int stz = (z/cbsize*cbsize) - 1;
@@ -176,15 +162,13 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
                 
                 int offset = dx * (cbsize+2) *(cbsize+2) + dy * (cbsize+2) + dz;
                     //同时考虑在universe中出界的问题
-                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
+                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+0+N)%N);
                 }
         }      
     } 
     else if(cbx == 3 && cby == 3 && cbz == 2){
-            //令z = 0 ,变动xy平面
-        //该面的中心距离cubeblock的中心相距(cbsize)/2 个 1
-        //这里默认cubesize是奇数了,且该距离可加可减去。
-        //坏了，就算是cbsize是奇数，外面的层cbsize+2也是奇数
+            //令z = cbsize+1 ,变动xy平面
+ 
         int stx = (x/cbsize*cbsize) - 1;
         int sty = (y/cbsize*cbsize) - 1;
         int stz = (z/cbsize*cbsize) - 1 + (cbsize + 1);
@@ -195,7 +179,7 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
                 
                 int offset = dx * (cbsize+2) *(cbsize+2) + dy * (cbsize+2) + dz;
                     //同时考虑在universe中出界的问题
-                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+dz+N)%N);
+                cubeBlock[offset] = AT((stx+dx+N)%N,(sty+dy+N)%N,(stz+0+N)%N);
                 }
         }              
     } 
@@ -203,6 +187,17 @@ void life3d_run(int N, int cbsize,char *universe,char*next, int T)
 
     //超出cube后需要从外界取数，还需要判断是否超出最大者，最大者需要取模。
     //6+12+8 = 26，一共26种情况
+    // for (int dx = -1; dx <= 1; dx++)
+    //         for (int dy = -1; dy <= 1; dy++)
+    //             for (int dz = -1; dz <= 1; dz++)
+    //             {
+    //                 if (dx == 0 && dy == 0 && dz == 0)
+    //                     continue;
+    //                 int nx = cbx + dx;
+    //                 int ny = cby + dy;
+    //                 int nz = cbz + dz;
+    //                 alive += cubeBlock[nx*(cbsize+2)*(cbsize+2)+ny*(cbsize+2)+nz];
+    //             }
     alive += cubeBlock[cbIdx+1];
     alive += cubeBlock[cbIdx-1];
     alive += cubeBlock[cbIdx+(cbsize+2)];
